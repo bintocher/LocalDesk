@@ -9,6 +9,7 @@ import type { ServerEvent } from "../types.js";
 import type { Session } from "./session-store.js";
 import { loadApiSettings } from "./settings-store.js";
 import { TOOLS, getSystemPrompt } from "./tools-definitions.js";
+import { getInitialPrompt } from "./prompt-loader.js";
 import { ToolExecutor } from "./tools-executor.js";
 import { writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
@@ -179,9 +180,11 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
 
       // Add current prompt ONLY if it's different from the last one in history
       if (prompt !== lastUserPrompt) {
+        // Format prompt with current date
+        const formattedPrompt = getInitialPrompt(prompt);
         messages.push({
           role: 'user',
-          content: prompt
+          content: formattedPrompt
         });
       }
 
