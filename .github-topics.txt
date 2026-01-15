@@ -1,0 +1,29 @@
+# GitHub Repository Topics
+# Add these topics to your repository via GitHub Settings > Topics
+
+ai-assistant
+local-llm
+openai-sdk
+electron-app
+desktop-app
+vllm
+qwen
+llama
+ollama
+ai-agent
+function-calling
+memory-system
+file-operations
+web-search
+code-assistant
+typescript
+react
+macos
+windows
+linux
+cross-platform
+streaming
+tool-calling
+sqlite
+electron
+vite
