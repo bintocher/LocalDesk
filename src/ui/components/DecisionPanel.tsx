@@ -153,7 +153,7 @@ export function DecisionPanel({
     <div className="rounded-2xl border border-accent/20 bg-accent-subtle p-5">
       <div className="text-xs font-semibold text-accent">Tool Permission Request</div>
       <p className="mt-2 text-sm text-ink-700">
-        Claude wants to use: <span className="font-medium">{request.toolName}</span>
+        Agent wants to use tool: <span className="font-medium">{request.toolName}</span>
       </p>
       
       {request.explanation && (

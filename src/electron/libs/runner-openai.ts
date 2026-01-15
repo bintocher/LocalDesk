@@ -8,7 +8,7 @@ import OpenAI from 'openai';
 import type { ServerEvent } from "../types.js";
 import type { Session } from "./session-store.js";
 import { loadApiSettings } from "./settings-store.js";
-import { TOOLS, getSystemPrompt } from "./tools-definitions.js";
+import { TOOLS, getTools, getSystemPrompt } from "./tools-definitions.js";
 import { getInitialPrompt } from "./prompt-loader.js";
 import { ToolExecutor } from "./tools-executor.js";
 import { writeFileSync, existsSync, mkdirSync } from "fs";
@@ -25,6 +25,7 @@ export type RunnerOptions = {
 
 export type RunnerHandle = {
   abort: () => void;
+  resolvePermission: (toolUseId: string, approved: boolean) => void;
 };
 
 const DEFAULT_CWD = process.cwd();
@@ -64,6 +65,9 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
   const { prompt, session, onEvent, onSessionUpdate } = options;
   let aborted = false;
 
+  // Permission tracking
+  const pendingPermissions = new Map<string, { resolve: (approved: boolean) => void }>();
+
   const sendMessage = (type: string, content: any) => {
     onEvent({
       type: "stream.message" as any,
@@ -84,6 +88,14 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
       type: "permission.request",
       payload: { sessionId: session.id, toolUseId, toolName, input, explanation }
     });
+  };
+
+  const resolvePermission = (toolUseId: string, approved: boolean) => {
+    const pending = pendingPermissions.get(toolUseId);
+    if (pending) {
+      pending.resolve(approved);
+      pendingPermissions.delete(toolUseId);
+    }
   };
 
   // Start the query in the background
@@ -118,6 +130,34 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
 
       // Build conversation history from session
       const currentCwd = session.cwd || DEFAULT_CWD;
+      
+      // Function to load memory
+      const loadMemory = async (): Promise<string | undefined> => {
+        if (!guiSettings?.enableMemory) return undefined;
+        
+        try {
+          const { readFile, access } = await import('fs/promises');
+          const { constants } = await import('fs');
+          const { join } = await import('path');
+          const { homedir } = await import('os');
+          
+          const memoryPath = join(homedir(), '.agent-cowork', 'memory.md');
+          
+          await access(memoryPath, constants.F_OK);
+          const content = await readFile(memoryPath, 'utf-8');
+          console.log('[OpenAI Runner] Memory loaded from:', memoryPath);
+          return content;
+        } catch (error: any) {
+          if (error.code !== 'ENOENT') {
+            console.warn('[OpenAI Runner] Failed to load memory:', error.message);
+          }
+          return undefined;
+        }
+      };
+      
+      // Load memory initially
+      let memoryContent = await loadMemory();
+      
       const messages: ChatMessage[] = [
         {
           role: 'system',
@@ -128,6 +168,7 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
       // Load previous messages from session history
       const sessionStore = (global as any).sessionStore;
       let lastUserPrompt = '';
+      let isFirstUserPrompt = true;
       
       if (sessionStore && session.id) {
         const history = sessionStore.getSessionHistory(session.id);
@@ -135,6 +176,9 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
           console.log(`[OpenAI Runner] Loading ${history.messages.length} messages from history`);
           
           let currentAssistantMessage = '';
+          let currentMessageHasTools = false;
+          let currentMessageNoteAdded = false;
+          let pendingToolUse: any = null;
           
           // Convert session history to OpenAI format
           for (const msg of history.messages) {
@@ -148,24 +192,55 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
                   content: currentAssistantMessage.trim()
                 });
                 currentAssistantMessage = '';
+                currentMessageHasTools = false;
+                currentMessageNoteAdded = false;
               }
               
               // Track last user prompt to avoid duplication
               lastUserPrompt = promptText;
               
+              // ALWAYS format user prompts with date (even from history)
+              // This ensures consistent context for the model
+              // Only add memory to the FIRST user prompt
+              const formattedPromptText = isFirstUserPrompt 
+                ? getInitialPrompt(promptText, memoryContent)
+                : getInitialPrompt(promptText);
+              isFirstUserPrompt = false;
+              
               messages.push({
                 role: 'user',
-                content: promptText
+                content: formattedPromptText
               });
             } else if (msg.type === 'text') {
               // Accumulate text into assistant message
               currentAssistantMessage += (msg as any).text || '';
+            } else if (msg.type === 'tool_use') {
+              // Mark that this message has tools
+              currentMessageHasTools = true;
+              
+              // Add note about compressed history on first tool call in THIS message
+              if (!currentMessageNoteAdded) {
+                currentAssistantMessage += `\n\n---\nNote: The following shows compressed tool execution history for context. To perform actions, use actual function calling.\n---\n\n`;
+                currentMessageNoteAdded = true;
+              }
+              
+              // Store tool use for pairing with result
+              pendingToolUse = msg;
             } else if (msg.type === 'tool_result') {
-              // Add tool result as part of assistant message
-              const output = (msg as any).output || '';
-              currentAssistantMessage += `\n[Tool Output: ${output}]\n`;
+              // Compressed tool history: CSV format - tool,explanation,result
+              if (pendingToolUse) {
+                const toolName = (pendingToolUse as any).name || 'Unknown';
+                const toolInput = (pendingToolUse as any).input || {};
+                const explanation = toolInput.explanation || 'No explanation';
+                const output = (msg as any).output || '';
+                const isError = (msg as any).is_error;
+                const briefOutput = output.substring(0, 80).replace(/\n/g, ' ');
+                
+                currentAssistantMessage += `${toolName},${explanation},${isError ? 'ERROR: ' : ''}${briefOutput}${output.length > 80 ? '...' : ''}\n`;
+                pendingToolUse = null;
+              }
             }
-            // Skip other message types (tool_use, system, etc.)
+            // Skip other message types (system, etc.)
           }
           
           // Flush final assistant message if any
@@ -174,25 +249,38 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
               role: 'assistant',
               content: currentAssistantMessage.trim()
             });
+            currentMessageHasTools = false;
+            currentMessageNoteAdded = false;
           }
         }
       }
 
       // Add current prompt ONLY if it's different from the last one in history
       if (prompt !== lastUserPrompt) {
-        // Format prompt with current date
-        const formattedPrompt = getInitialPrompt(prompt);
+        // Always format prompt with current date for context
+        // Add memory only if this is a new session (no history)
+        const shouldAddMemory = messages.length === 1; // Only system message exists
+        const formattedPrompt = shouldAddMemory 
+          ? getInitialPrompt(prompt, memoryContent)
+          : getInitialPrompt(prompt);
         messages.push({
           role: 'user',
           content: formattedPrompt
         });
       }
 
+      // Track total usage across all iterations
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      const sessionStartTime = Date.now();
+
       // Log request
+      const activeTools = getTools(guiSettings);
+      
       logApiRequest(session.id, {
         model: guiSettings.model,
         messages,
-        tools: TOOLS,
+        tools: activeTools,
         temperature: guiSettings.temperature || 0.3
       });
 
@@ -201,9 +289,10 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
         subtype: 'init',
         cwd: session.cwd || DEFAULT_CWD,
         session_id: session.id,
-        tools: TOOLS.map(t => t.function.name),
+        tools: activeTools.map(t => t.function.name),
         model: guiSettings.model,
-        permissionMode: 'default'
+        permissionMode: guiSettings.permissionMode || 'ask',
+        memoryEnabled: guiSettings.enableMemory || false
       });
 
       // Update session with ID for resume support
@@ -219,25 +308,47 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
         iterationCount++;
         console.log(`[OpenAI Runner] Iteration ${iterationCount}`);
         console.log(`[OpenAI Runner] Messages count: ${messages.length}`);
-        console.log(`[OpenAI Runner] Last 3 messages:`, JSON.stringify(messages.slice(-3), null, 2));
+        console.log(`[OpenAI Runner] All messages:`, JSON.stringify(messages, null, 2));
 
-        // Call OpenAI API
+        // Prepare request payload for logging
+        const requestPayload = {
+          model: guiSettings.model,
+          messages: messages,
+          tools: activeTools,
+          temperature: guiSettings.temperature || 0.3,
+          stream: true,
+          parallel_tool_calls: true,  // Enable parallel tool calls
+          stream_options: { include_usage: true }  // Include token usage in stream
+        };
+
+        // Log full request
+        console.log('[OpenAI Runner] ===== RAW REQUEST =====');
+        console.log(JSON.stringify(requestPayload, null, 2));
+        console.log('[OpenAI Runner] ===== END REQUEST =====');
+
+        // Call OpenAI API (with explicit typing)
         const stream = await client.chat.completions.create({
           model: guiSettings.model,
           messages: messages as any[],
-          tools: TOOLS as any[],
+          tools: activeTools as any[],
           temperature: guiSettings.temperature || 0.3,
-          stream: true
+          stream: true,
+          parallel_tool_calls: true,
+          stream_options: { include_usage: true }
         });
 
         let assistantMessage = '';
         let toolCalls: any[] = [];
         let currentToolCall: any = null;
         let contentStarted = false;
+        let fullStreamResponse: any[] = []; // Collect all chunks for logging
 
         // Process stream
         for await (const chunk of stream) {
           if (aborted) break;
+
+          // Collect full chunk for logging
+          fullStreamResponse.push(chunk);
 
           const delta = chunk.choices[0]?.delta;
           
@@ -308,8 +419,48 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
           });
         }
 
+        // Extract metadata from chunks
+        const firstChunk = fullStreamResponse[0] || {};
+        const lastChunk = fullStreamResponse[fullStreamResponse.length - 1] || {};
+        const finishChunk = fullStreamResponse.find(c => c.choices?.[0]?.finish_reason) || {};
+        
+        // Build unified raw JSON response
+        const rawJsonResponse = {
+          id: firstChunk.id || null,
+          object: "chat.completion",
+          created: firstChunk.created || null,
+          model: firstChunk.model || null,
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: assistantMessage || null,
+                tool_calls: toolCalls.length > 0 ? toolCalls : null
+              },
+              finish_reason: finishChunk.choices?.[0]?.finish_reason || null,
+              logprobs: null
+            }
+          ],
+          usage: lastChunk.usage || null,
+          system_fingerprint: firstChunk.system_fingerprint || null
+        };
+        
+        // Log unified raw JSON response
+        console.log('[OpenAI Runner] ===== RAW JSON RESPONSE =====');
+        console.log(JSON.stringify(rawJsonResponse, null, 2));
+        console.log('[OpenAI Runner] ===== END RAW JSON RESPONSE =====');
+        
+        // Accumulate token usage
+        if (rawJsonResponse.usage) {
+          totalInputTokens += rawJsonResponse.usage.prompt_tokens || 0;
+          totalOutputTokens += rawJsonResponse.usage.completion_tokens || 0;
+        }
+        
         // If no tool calls, we're done
         if (toolCalls.length === 0) {
+          console.log(`[OpenAI Runner] Final assistant response (no tools):`, assistantMessage);
+          
           // Send assistant message for UI display
           sendMessage('assistant', {
             message: {
@@ -327,15 +478,15 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
           sendMessage('result', {
             subtype: 'success',
             is_error: false,
-            duration_ms: 1000,
-            duration_api_ms: 800,
+            duration_ms: Date.now() - sessionStartTime,
+            duration_api_ms: Date.now() - sessionStartTime, // Approximate API time
             num_turns: iterationCount,
             result: assistantMessage,
             session_id: session.id,
             total_cost_usd: 0,
             usage: {
-              input_tokens: 0,
-              output_tokens: 0
+              input_tokens: totalInputTokens,
+              output_tokens: totalOutputTokens
             }
           });
 
@@ -397,14 +548,47 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
           const toolName = toolCall.function.name;
           const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
 
-          console.log(`[OpenAI Runner] Executing tool: ${toolName}`, toolArgs);
-
           // Request permission
           const toolUseId = toolCall.id;
-          sendPermissionRequest(toolUseId, toolName, toolArgs, toolArgs.explanation);
+          // Reload settings to get latest permissionMode
+          const currentSettings = loadApiSettings();
+          const permissionMode = currentSettings?.permissionMode || 'ask';
+          
+          console.log(`[OpenAI Runner] Executing tool: ${toolName} (permission mode: ${permissionMode})`, toolArgs);
+          
+          if (permissionMode === 'ask') {
+            // Send permission request and wait for user approval
+            sendPermissionRequest(toolUseId, toolName, toolArgs, toolArgs.explanation);
+            
+            // Wait for permission result from UI
+            const approved = await new Promise<boolean>((resolve) => {
+              pendingPermissions.set(toolUseId, { resolve });
+            });
+            
+            if (!approved) {
+              console.log(`[OpenAI Runner] Tool execution denied by user: ${toolName}`);
+              
+              // Add error result for denied tool
+              toolResults.push({
+                role: 'tool',
+                tool_call_id: toolCall.id,
+                name: toolName,
+                content: 'Error: Tool execution denied by user'
+              });
+              
+              continue; // Skip this tool
+            }
+          }
+          // In default mode, execute immediately without asking
 
-          // Execute tool immediately (permission is handled by default mode)
+          // Execute tool
           const result = await toolExecutor.executeTool(toolName, toolArgs);
+
+          // If Memory tool was executed successfully, reload memory for next iteration
+          if (toolName === 'Memory' && result.success) {
+            console.log('[OpenAI Runner] Memory tool executed, reloading memory...');
+            memoryContent = await loadMemory();
+          }
 
           // Add tool result to messages
           toolResults.push({
@@ -439,6 +623,25 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
 
         // Add all tool results to messages
         messages.push(...toolResults);
+        
+        // If memory was updated, refresh the first user message with new memory
+        if (memoryContent !== undefined && messages.length > 1 && messages[1].role === 'user') {
+          // Find the first user message (index 1, after system)
+          const firstUserMsg = messages[1];
+          if (typeof firstUserMsg.content === 'string') {
+            // Extract the original request from the message
+            const match = firstUserMsg.content.match(/ORIGINAL USER REQUEST:\n\n([\s\S]+)$/);
+            if (match) {
+              const originalRequest = match[1];
+              // Regenerate the message with updated memory
+              messages[1] = {
+                role: 'user',
+                content: getInitialPrompt(originalRequest, memoryContent)
+              };
+              console.log('[OpenAI Runner] Updated first user message with refreshed memory');
+            }
+          }
+        }
       }
 
       if (iterationCount >= MAX_ITERATIONS) {
@@ -464,6 +667,9 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerHandle> {
     abort: () => {
       aborted = true;
       console.log('[OpenAI Runner] Aborted');
+    },
+    resolvePermission: (toolUseId: string, approved: boolean) => {
+      resolvePermission(toolUseId, approved);
     }
   };
 }

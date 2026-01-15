@@ -7,7 +7,7 @@ import type { ToolDefinition, ToolResult, ToolExecutionContext } from './base-to
 
 export interface ExtractPageParams {
   urls: string[];
-  reasoning: string;
+  explanation: string;
 }
 
 export interface PageContent {
@@ -37,7 +37,7 @@ export const ExtractPageContentToolDefinition: ToolDefinition = {
     parameters: {
       type: "object",
       properties: {
-        reasoning: {
+        explanation: {
           type: "string",
           description: "Why extract these specific pages"
         },
@@ -51,7 +51,7 @@ export const ExtractPageContentToolDefinition: ToolDefinition = {
           maxItems: 5
         }
       },
-      required: ["reasoning", "urls"]
+      required: ["explanation", "urls"]
     }
   }
 };
@@ -129,21 +129,32 @@ export class ExtractPageContentTool {
   }
 
   formatResults(results: PageContent[], contentLimit: number = 5000): string {
-    let formatted = 'Extracted Page Content:\n\n';
+    let formatted = '📄 **Extracted Page Content**\n\n';
+    formatted += '**IMPORTANT**: When using information from these pages, ALWAYS cite the source with [Source X] and include the URL.\n\n';
 
     results.forEach((result, index) => {
-      formatted += `${index + 1}. ${result.url}\n`;
+      const sourceNum = index + 1;
+      formatted += `**[Source ${sourceNum}]** ${result.url}\n`;
       
       if (result.success) {
         const preview = result.content.substring(0, contentLimit);
-        formatted += `**Content** (${result.char_count} characters):\n`;
-        formatted += `${preview}${result.content.length > contentLimit ? '\n\n...[truncated]...' : ''}\n\n`;
+        formatted += `📊 **Content** (${result.char_count} characters total):\n\n`;
+        formatted += `${preview}`;
+        if (result.content.length > contentLimit) {
+          formatted += `\n\n...[Content truncated. Showing first ${contentLimit} of ${result.char_count} characters]...`;
+        }
+        formatted += '\n\n';
       } else {
-        formatted += `**Failed**: ${result.error || 'Unknown error'}\n\n`;
+        formatted += `❌ **Extraction Failed**: ${result.error || 'Unknown error'}\n\n`;
       }
-
+      
       formatted += '---\n\n';
     });
+
+    formatted += '**Instructions:**\n';
+    formatted += '- Cite sources as [Source 1], [Source 2], etc.\n';
+    formatted += '- Include URLs as clickable links: [text](url)\n';
+    formatted += '- Always provide source attribution for facts and data\n';
 
     return formatted;
   }

@@ -6,6 +6,7 @@ import type { ServerEvent, ApiSettings } from "./types";
 import { Sidebar } from "./components/Sidebar";
 import { StartSessionModal } from "./components/StartSessionModal";
 import { SettingsModal } from "./components/SettingsModal";
+import { FileBrowser } from "./components/FileBrowser";
 import { PromptInput, usePromptActions } from "./components/PromptInput";
 import { MessageCard } from "./components/EventCard";
 import MDContent from "./render/markdown";
@@ -16,6 +17,7 @@ function App() {
   const [partialMessage, setPartialMessage] = useState("");
   const [showPartialMessage, setShowPartialMessage] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [apiSettings, setApiSettings] = useState<ApiSettings | null>(null);
   const autoScrollRef = useRef(true); // Use ref for immediate access
   const partialUpdateScheduledRef = useRef(false);
@@ -126,21 +128,40 @@ function App() {
   useEffect(() => {
     // Only scroll if we actually added a new message (not just updated existing ones)
     if (messages.length > prevMessagesLengthRef.current) {
-      if (autoScrollRef.current) {
-        console.log('[AutoScroll] New message detected, scrolling to bottom');
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }
+      console.log('[AutoScroll] New message detected, scrolling to bottom');
+      // Always scroll to bottom when new message arrives
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      autoScrollRef.current = true; // Re-enable auto-scroll
       prevMessagesLengthRef.current = messages.length;
     }
   }, [messages]);
 
   // Auto-scroll during streaming - ONLY if user is at bottom
+  const lastScrollTimeRef = useRef<number>(0);
+  
   useEffect(() => {
     if (!showPartialMessage || !partialMessage) return;
     
+    // Check if user is still at bottom before scrolling
+    const messagesContainer = document.querySelector('.overflow-y-auto');
+    if (!messagesContainer) return;
+    
+    const { scrollHeight, scrollTop, clientHeight } = messagesContainer;
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    const isNearBottom = distanceFromBottom < 300; // Increased threshold for long messages
+    
+    // Update ref in real-time
+    autoScrollRef.current = isNearBottom;
+    
     // Only scroll if user is near bottom
     if (autoScrollRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+      const now = Date.now();
+      // Throttle scroll calls to max once per 30ms for more responsive scrolling
+      if (now - lastScrollTimeRef.current > 30) {
+        lastScrollTimeRef.current = now;
+        // Force scroll to bottom immediately for long messages
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      }
     }
   }, [showPartialMessage, partialMessage]);
 
@@ -155,7 +176,7 @@ function App() {
     const handleScroll = () => {
       const { scrollHeight, scrollTop, clientHeight } = messagesContainer;
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-      const isNearBottom = distanceFromBottom < 150;
+      const isNearBottom = distanceFromBottom < 300; // Increased threshold for long messages
       
       // Debug logging
       if (autoScrollRef.current !== isNearBottom) {
@@ -194,6 +215,20 @@ function App() {
     resolvePermissionRequest(activeSessionId, toolUseId);
   }, [activeSessionId, sendEvent, resolvePermissionRequest]);
 
+  const handleEditMessage = useCallback((messageIndex: number, newPrompt: string) => {
+    if (!activeSessionId) return;
+    
+    // Send event to edit and re-run from this message
+    sendEvent({ 
+      type: "message.edit", 
+      payload: { 
+        sessionId: activeSessionId, 
+        messageIndex, 
+        newPrompt 
+      } 
+    });
+  }, [activeSessionId, sendEvent]);
+
   const handleSaveSettings = useCallback((settings: ApiSettings) => {
     sendEvent({ type: "settings.save", payload: { settings } });
     setApiSettings(settings);
@@ -231,7 +266,57 @@ function App() {
             )}
           </div>
           <span className="text-sm font-medium text-ink-700">{activeSession?.title || "Agent Cowork"}</span>
-          <div className="w-24"></div>
+          <div className="flex items-center gap-2">
+            {activeSession?.cwd && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setShowFileBrowser(!showFileBrowser)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-mono bg-white border rounded-l-lg transition-colors max-w-xs ${
+                    showFileBrowser 
+                      ? 'text-accent border-accent/30 bg-accent/5' 
+                      : 'text-ink-600 border-ink-900/10 hover:bg-ink-50 hover:text-ink-900'
+                  }`}
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  title={activeSession.cwd}
+                >
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  <span className="truncate">{activeSession.cwd.split('/').pop() || activeSession.cwd}</span>
+                </button>
+                <button
+                  onClick={() => window.electron.invoke('open-path-in-finder', activeSession.cwd)}
+                  className="flex items-center justify-center w-8 h-8 text-ink-600 bg-white border border-l-0 border-ink-900/10 rounded-r-lg hover:bg-ink-50 hover:text-ink-900 transition-colors"
+                  style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+                  title="Open in file manager"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </button>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                const newMode = apiSettings?.permissionMode === 'ask' ? 'default' : 'ask';
+                const newSettings = { ...apiSettings, permissionMode: newMode } as ApiSettings;
+                sendEvent({ type: 'settings.save', payload: { settings: newSettings } });
+                setApiSettings(newSettings);
+              }}
+              className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                apiSettings?.permissionMode === 'ask'
+                  ? 'bg-ink-100 border-ink-300 text-ink-700'
+                  : 'bg-success/10 border-success/30 text-success'
+              }`}
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              title={apiSettings?.permissionMode === 'ask' ? 'Ask before each tool' : 'Auto-execute tools'}
+            >
+              <span className={`w-2 h-2 rounded-full ${
+                apiSettings?.permissionMode === 'ask' ? 'bg-ink-400' : 'bg-success'
+              }`}></span>
+              {apiSettings?.permissionMode === 'ask' ? 'Ask Mode' : 'Auto Mode'}
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-8 pb-40 pt-6">
@@ -246,10 +331,12 @@ function App() {
                 <MessageCard
                   key={idx}
                   message={msg}
+                  messageIndex={idx}
                   isLast={idx === messages.length - 1}
                   isRunning={isRunning}
                   permissionRequest={permissionRequests[0]}
                   onPermissionResult={handlePermissionResult}
+                  onEditMessage={handleEditMessage}
                 />
               ))
             )}
@@ -314,6 +401,13 @@ function App() {
             </button>
           </div>
         </div>
+      )}
+
+      {showFileBrowser && activeSession?.cwd && (
+        <FileBrowser 
+          cwd={activeSession.cwd} 
+          onClose={() => setShowFileBrowser(false)} 
+        />
       )}
     </div>
   );

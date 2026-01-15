@@ -17,6 +17,8 @@ export type ApiSettings = {
   model: string;
   temperature?: number;  // Optional temperature for vLLM/OpenAI-compatible APIs
   tavilyApiKey?: string; // Optional Tavily API key for web search
+  permissionMode?: 'default' | 'ask'; // Permission mode: 'default' = auto-execute, 'ask' = require confirmation
+  enableMemory?: boolean; // Enable long-term memory tool
 };
 
 export type UserPromptMessage = {
@@ -34,6 +36,7 @@ export type SessionInfo = {
   status: SessionStatus;
   claudeSessionId?: string;
   cwd?: string;
+  isPinned?: boolean;
   createdAt: number;
   updatedAt: number;
 };
@@ -56,8 +59,10 @@ export type ClientEvent =
   | { type: "session.continue"; payload: { sessionId: string; prompt: string } }
   | { type: "session.stop"; payload: { sessionId: string } }
   | { type: "session.delete"; payload: { sessionId: string } }
+  | { type: "session.pin"; payload: { sessionId: string; isPinned: boolean } }
   | { type: "session.list" }
   | { type: "session.history"; payload: { sessionId: string } }
   | { type: "permission.response"; payload: { sessionId: string; toolUseId: string; result: PermissionResult } }
+  | { type: "message.edit"; payload: { sessionId: string; messageIndex: number; newPrompt: string } }
   | { type: "settings.get" }
   | { type: "settings.save"; payload: { settings: ApiSettings } };

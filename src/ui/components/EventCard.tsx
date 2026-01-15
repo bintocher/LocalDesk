@@ -179,7 +179,17 @@ const AssistantBlockCard = ({ title, text, showIndicator = false }: { title: str
   </div>
 );
 
-const ToolUseCard = ({ messageContent, showIndicator = false }: { messageContent: MessageContent; showIndicator?: boolean }) => {
+const ToolUseCard = ({ 
+  messageContent, 
+  showIndicator = false,
+  permissionRequest,
+  onPermissionResult
+}: { 
+  messageContent: MessageContent; 
+  showIndicator?: boolean;
+  permissionRequest?: PermissionRequest;
+  onPermissionResult?: (toolUseId: string, result: PermissionResult) => void;
+}) => {
   if (messageContent.type !== "tool_use") return null;
   
   const toolStatus = useToolStatus(messageContent.id);
@@ -202,6 +212,20 @@ const ToolUseCard = ({ messageContent, showIndicator = false }: { messageContent
       default: return null;
     }
   };
+
+  // Check if this tool needs permission
+  const isActiveRequest = permissionRequest && permissionRequest.toolUseId === messageContent.id;
+
+  if (isActiveRequest && onPermissionResult) {
+    return (
+      <div className="mt-4">
+        <DecisionPanel
+          request={permissionRequest}
+          onSubmit={(result) => onPermissionResult(permissionRequest.toolUseId, result)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-2 rounded-[1rem] bg-surface-tertiary px-3 py-2 mt-4 overflow-hidden">
@@ -285,33 +309,104 @@ const SystemInfoCard = ({ message, showIndicator = false }: { message: SDKMessag
   );
 };
 
-const UserMessageCard = ({ message, showIndicator = false }: { message: { type: "user_prompt"; prompt: string }; showIndicator?: boolean }) => (
-  <div className="flex flex-col mt-4">
-    <div className="header text-accent flex items-center gap-2">
-      <StatusDot variant="success" isActive={showIndicator} isVisible={showIndicator} />
-      User
+const UserMessageCard = ({ 
+  message, 
+  showIndicator = false,
+  onEdit
+}: { 
+  message: { type: "user_prompt"; prompt: string }; 
+  showIndicator?: boolean;
+  onEdit?: (newPrompt: string) => void;
+}) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedText, setEditedText] = useState(message.prompt);
+
+  const handleSave = () => {
+    if (editedText.trim() && onEdit) {
+      onEdit(editedText.trim());
+      setIsEditing(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setEditedText(message.prompt);
+    setIsEditing(false);
+  };
+
+  return (
+    <div className="flex flex-col mt-4 group">
+      <div className="header text-accent flex items-center gap-2">
+        <StatusDot variant="success" isActive={showIndicator} isVisible={showIndicator} />
+        User
+      </div>
+      {isEditing ? (
+        <div className="flex flex-col gap-2 mt-2">
+          <textarea
+            value={editedText}
+            onChange={(e) => setEditedText(e.target.value)}
+            className="w-full min-h-[100px] p-3 rounded-lg bg-surface-secondary border border-ink-900/10 focus:border-accent focus:outline-none resize-y"
+            autoFocus
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={handleSave}
+              className="px-4 py-2 rounded-md bg-accent text-white hover:bg-accent/90 transition-colors"
+            >
+              Send
+            </button>
+            <button
+              onClick={handleCancel}
+              className="px-4 py-2 rounded-md bg-surface-tertiary hover:bg-surface-secondary text-ink-700 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <MDContent text={message.prompt} />
+          {onEdit && (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="mt-2 self-start text-xs px-3 py-1.5 rounded-md text-ink-400 hover:text-accent hover:bg-surface-tertiary opacity-0 group-hover:opacity-100 transition-all duration-200"
+            >
+              Edit
+            </button>
+          )}
+        </>
+      )}
     </div>
-    <MDContent text={message.prompt} />
-  </div>
-);
+  );
+};
 
 export function MessageCard({
   message,
   isLast = false,
   isRunning = false,
   permissionRequest,
-  onPermissionResult
+  onPermissionResult,
+  onEditMessage,
+  messageIndex
 }: {
   message: StreamMessage;
   isLast?: boolean;
   isRunning?: boolean;
   permissionRequest?: PermissionRequest;
   onPermissionResult?: (toolUseId: string, result: PermissionResult) => void;
+  onEditMessage?: (messageIndex: number, newPrompt: string) => void;
+  messageIndex?: number;
 }) {
   const showIndicator = isLast && isRunning;
 
   if (message.type === "user_prompt") {
-    return <UserMessageCard message={message} showIndicator={showIndicator} />;
+    return <UserMessageCard 
+      message={message} 
+      showIndicator={showIndicator}
+      onEdit={onEditMessage && typeof messageIndex === 'number' 
+        ? (newPrompt) => onEditMessage(messageIndex, newPrompt)
+        : undefined
+      }
+    />;
   }
 
   const sdkMessage = message as SDKMessage;
@@ -350,7 +445,7 @@ export function MessageCard({
             if (content.name === "AskUserQuestion") {
               return <AskUserQuestionCard key={idx} messageContent={content} permissionRequest={permissionRequest} onPermissionResult={onPermissionResult} />;
             }
-            return <ToolUseCard key={idx} messageContent={content} showIndicator={isLastContent && showIndicator} />;
+            return <ToolUseCard key={idx} messageContent={content} showIndicator={isLastContent && showIndicator} permissionRequest={permissionRequest} onPermissionResult={onPermissionResult} />;
           }
           return null;
         })}

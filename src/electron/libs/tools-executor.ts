@@ -13,9 +13,9 @@ import { executeWriteTool } from './tools/write-tool.js';
 import { executeEditTool } from './tools/edit-tool.js';
 import { executeGlobTool } from './tools/glob-tool.js';
 import { executeGrepTool } from './tools/grep-tool.js';
-import { executeAskUserQuestionTool } from './tools/ask-user-question-tool.js';
 import { WebSearchTool } from './tools/web-search.js';
 import { ExtractPageContentTool } from './tools/extract-page-content.js';
+import { executeMemoryTool } from './tools/memory-tool.js';
 
 export { ToolResult };
 
@@ -89,8 +89,8 @@ export class ToolExecutor {
         case 'ExtractPageContent':
           return await this.executeExtractPage(args);
         
-        case 'AskUserQuestion':
-          return await executeAskUserQuestionTool(args as any, context);
+        case 'Memory':
+          return await executeMemoryTool(args as any, context);
         
         default:
           return {
@@ -118,7 +118,7 @@ export class ToolExecutor {
     try {
       const results = await this.webSearchTool.search({
         query: args.query,
-        reasoning: args.reasoning,
+        explanation: args.explanation,
         max_results: args.max_results || 5
       });
 
@@ -147,7 +147,7 @@ export class ToolExecutor {
     try {
       const results = await this.extractPageTool.extract({
         urls: args.urls,
-        reasoning: args.reasoning
+        explanation: args.explanation
       });
 
       const formatted = this.extractPageTool.formatResults(results);

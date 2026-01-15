@@ -13,6 +13,7 @@ export type SessionView = {
   title: string;
   status: SessionStatus;
   cwd?: string;
+  isPinned?: boolean;
   messages: StreamMessage[];
   permissionRequests: PermissionRequest[];
   lastPrompt?: string;
@@ -40,6 +41,7 @@ interface AppState {
   setActiveSessionId: (id: string | null) => void;
   markHistoryRequested: (sessionId: string) => void;
   resolvePermissionRequest: (sessionId: string, toolUseId: string) => void;
+  sendEvent: (event: any) => void;
   handleServerEvent: (event: ServerEvent) => void;
 }
 
@@ -64,6 +66,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   setGlobalError: (globalError) => set({ globalError }),
   setShowStartModal: (showStartModal) => set({ showStartModal }),
   setActiveSessionId: (id) => set({ activeSessionId: id }),
+  sendEvent: (event) => {
+    window.electron.sendClientEvent(event);
+  },
 
   markHistoryRequested: (sessionId) => {
     set((state) => {
@@ -102,6 +107,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             status: session.status,
             title: session.title,
             cwd: session.cwd,
+            isPinned: session.isPinned,
             createdAt: session.createdAt,
             updatedAt: session.updatedAt
           };

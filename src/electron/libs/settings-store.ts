@@ -25,6 +25,11 @@ export function loadApiSettings(): ApiSettings | null {
       return null;
     }
     
+    // Set default permissionMode to 'ask' if not specified
+    if (!settings.permissionMode) {
+      settings.permissionMode = 'ask';
+    }
+    
     return settings;
   } catch (error) {
     console.error("Failed to load API settings:", error);

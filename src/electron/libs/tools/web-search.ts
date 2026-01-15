@@ -7,7 +7,7 @@ import type { ToolDefinition, ToolResult, ToolExecutionContext } from './base-to
 
 export interface WebSearchParams {
   query: string;
-  reasoning: string;
+  explanation: string;
   max_results?: number;
 }
 
@@ -35,7 +35,7 @@ export const WebSearchToolDefinition: ToolDefinition = {
     parameters: {
       type: "object",
       properties: {
-        reasoning: {
+        explanation: {
           type: "string",
           description: "Why this search is needed and what to expect"
         },
@@ -50,7 +50,7 @@ export const WebSearchToolDefinition: ToolDefinition = {
           maximum: 10
         }
       },
-      required: ["reasoning", "query"]
+      required: ["explanation", "query"]
     }
   }
 };
@@ -111,13 +111,21 @@ export class WebSearchTool {
   }
 
   formatResults(results: SearchResult[]): string {
-    let formatted = 'Search Results:\n\n';
+    let formatted = '🔍 **Web Search Results**\n\n';
+    formatted += '**IMPORTANT**: When citing information from these sources, ALWAYS include the source number [1], [2], etc. and the URL in your response.\n\n';
 
     results.forEach((result, index) => {
-      formatted += `${index + 1}. **${result.title}**\n`;
-      formatted += `   URL: ${result.url}\n`;
-      formatted += `   ${result.snippet}\n\n`;
+      const sourceNum = index + 1;
+      formatted += `**[${sourceNum}]** ${result.title}\n`;
+      formatted += `🔗 URL: ${result.url}\n`;
+      formatted += `📝 ${result.snippet}\n\n`;
     });
+
+    formatted += '\n---\n';
+    formatted += '**Instructions for citing sources:**\n';
+    formatted += '- Use [1], [2], etc. to reference sources in your answer\n';
+    formatted += '- Include clickable URLs when mentioning specific information\n';
+    formatted += '- Example: "According to [1](url), the price is..."\n';
 
     return formatted;
   }

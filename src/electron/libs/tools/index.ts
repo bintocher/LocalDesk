@@ -19,8 +19,8 @@ export * from './grep-tool.js';
 export * from './web-search.js';
 export * from './extract-page-content.js';
 
-// User interaction
-export * from './ask-user-question-tool.js';
+// Memory tool
+export * from './memory-tool.js';
 
 // Tool definitions array
 import { BashToolDefinition } from './bash-tool.js';
@@ -31,7 +31,7 @@ import { GlobToolDefinition } from './glob-tool.js';
 import { GrepToolDefinition } from './grep-tool.js';
 import { WebSearchToolDefinition } from './web-search.js';
 import { ExtractPageContentToolDefinition } from './extract-page-content.js';
-import { AskUserQuestionToolDefinition } from './ask-user-question-tool.js';
+import { MemoryToolDefinition } from './memory-tool.js';
 
 export const ALL_TOOL_DEFINITIONS = [
   BashToolDefinition,
@@ -42,6 +42,6 @@ export const ALL_TOOL_DEFINITIONS = [
   GrepToolDefinition,
   WebSearchToolDefinition,
   ExtractPageContentToolDefinition,
-  AskUserQuestionToolDefinition
+  MemoryToolDefinition
 ];
 

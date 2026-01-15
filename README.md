@@ -17,13 +17,28 @@
 
 ## ✨ Features
 
+### Core Capabilities
 - ✅ **OpenAI SDK** — full API control, compatible with any OpenAI-compatible endpoint
 - ✅ **Local Models** — vLLM, Ollama, LM Studio support
 - ✅ **Modular Tools** — each tool in separate file for easy maintenance
 - ✅ **Web Search** — Tavily integration for internet search (optional)
 - ✅ **Security** — directory sandboxing for safe file operations
 - ✅ **Cross-platform** — Windows, macOS, Linux with proper shell commands
-- ✅ **Modern UI** — React + Electron with auto-scroll and streaming
+
+### UI/UX Features
+- ✅ **Modern Interface** — React + Electron with smooth auto-scroll and streaming
+- ✅ **Message Editing** — edit and resend messages with history truncation
+- ✅ **Session Management** — pin important sessions, search through chat history
+- ✅ **Keyboard Shortcuts** — Cmd+Enter/Ctrl+Enter to send messages
+- ✅ **Spell Check** — built-in spell checking with context menu suggestions
+- ✅ **Permission System** — ask/default modes for tool execution control
+
+### Advanced Features
+- ✅ **Memory System** — persistent storage of user preferences in `~/.agent-cowork/memory.md`
+- ✅ **Dynamic Memory** — automatic reload after memory updates within same session
+- ✅ **Memory Editor** — edit memory directly in settings with reload/open folder buttons
+- ✅ **Token Tracking** — display input/output tokens and API duration
+- ✅ **Request Logging** — full raw JSON request/response logs for debugging
 
 ## 🚀 Quick Start
 
@@ -74,7 +89,9 @@ $env:NODE_ENV='development'; npx electron .
    - **Base URL** — API endpoint
    - **Model Name** — model identifier
    - **Temperature** — 0.0-2.0 (default: 0.3)
+   - **Permission Mode** — `ask` (confirm each tool) or `default` (auto-execute)
    - **Tavily API Key** (optional) — for web search
+   - **Enable Memory** — toggle persistent memory system
 3. Click **Save Settings**
 
 ### Example Configurations
@@ -123,12 +140,33 @@ vllm serve qwen3-30b-a3b-instruct-2507 \
 - Function calling support
 - Streaming support
 
+## 🧠 Memory System
+
+The Memory feature allows the agent to remember user preferences and context across sessions:
+
+1. **Enable in Settings:** Toggle "Enable Memory" in Settings (⚙️)
+2. **Automatic Storage:** Agent proactively notes important information from conversations
+3. **Manual Commands:** Ask agent to "remember" or "forget" specific things
+4. **Edit Memory:** View and edit `memory.md` directly in Settings
+5. **Dynamic Reload:** Memory updates are immediately available in the current session
+
+**Memory Location:** `~/.agent-cowork/memory.md`
+
+**Example Usage:**
+```
+User: "Remember that I prefer Python over JavaScript"
+Agent: [Stores in memory.md]
+
+User: "What language do I prefer?"
+Agent: "You prefer Python over JavaScript" ✅
+```
+
 ## 🛠️ Available Tools
 
 ### File Operations
 - **Bash** — execute shell commands (PowerShell/bash)
 - **Read** — read file contents
-- **Write** — create new files
+- **Write** — create new files (prevents overwriting existing files)
 - **Edit** — modify files (search & replace)
 
 ### Search Tools
@@ -139,10 +177,14 @@ vllm serve qwen3-30b-a3b-instruct-2507 \
 - **WebSearch** — search the web using Tavily API
 - **ExtractPageContent** — extract full content from web pages
 
-### User Interaction
-- **AskUserQuestion** — ask user for clarification
+### Memory Management
+- **Memory** — persistent storage for user preferences and context
+  - `create` — initialize memory file
+  - `append` — add new information
+  - `delete` — remove specific entries
+  - `read` — view current memory
 
-> **Note:** Web tools require Tavily API key in Settings
+> **Note:** Web tools require Tavily API key in Settings. Memory tool requires "Enable Memory" toggle.
 
 ## 📦 Building
 
@@ -184,7 +226,8 @@ src/
 │           ├── glob-tool.ts    # File search
 │           ├── grep-tool.ts    # Text search
 │           ├── web-search.ts   # Web search (Tavily)
-│           └── extract-page-content.ts # Page extraction
+│           ├── extract-page-content.ts # Page extraction
+│           └── memory-tool.ts  # Memory management
 └── ui/                         # React frontend
     ├── App.tsx                 # Main component
     ├── components/             # UI components
@@ -193,6 +236,7 @@ src/
 
 ## 🔐 Data Storage
 
+### Application Data
 **Windows:** `C:\Users\YourName\AppData\Roaming\agent-cowork\`  
 **macOS:** `~/Library/Application Support/agent-cowork/`  
 **Linux:** `~/.config/agent-cowork/`
@@ -200,20 +244,10 @@ src/
 Files:
 - `sessions.db` — SQLite database with chat history
 - `api-settings.json` — API configuration
-- `~/.agent-cowork/logs/` — request logs (debugging)
 
-## ⚠️ Troubleshooting
-
-**Model doesn't see command results?**
-- Ensure your model supports function calling
-- Check DevTools (F12) — should see `tool` messages in console
-
-**vLLM returns 404?**
-- Check Base URL (system automatically adds `/v1`)
-- Verify vLLM is running: `curl http://localhost:8000/health`
-
-**Cyrillic showing as `��������`?**
-- Fixed in v0.0.3+
+### Global Data (All Platforms)
+- `~/.agent-cowork/logs/` — raw JSON request/response logs (debugging)
+- `~/.agent-cowork/memory.md` — persistent memory storage (user preferences, context)
 
 ## 🤝 Contributing
 

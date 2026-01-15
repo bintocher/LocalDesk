@@ -14,6 +14,10 @@ export function SettingsModal({ onClose, onSave, currentSettings }: SettingsModa
   const [model, setModel] = useState(currentSettings?.model || "");
   const [temperature, setTemperature] = useState(currentSettings?.temperature?.toString() || "0.3");
   const [tavilyApiKey, setTavilyApiKey] = useState(currentSettings?.tavilyApiKey || "");
+  const [permissionMode, setPermissionMode] = useState<'default' | 'ask'>(currentSettings?.permissionMode || 'ask');
+  const [enableMemory, setEnableMemory] = useState(currentSettings?.enableMemory || false);
+  const [memoryContent, setMemoryContent] = useState("");
+  const [memoryLoading, setMemoryLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showTavilyPassword, setShowTavilyPassword] = useState(false);
 
@@ -24,17 +28,55 @@ export function SettingsModal({ onClose, onSave, currentSettings }: SettingsModa
       setModel(currentSettings.model || "");
       setTemperature(currentSettings.temperature?.toString() || "0.3");
       setTavilyApiKey(currentSettings.tavilyApiKey || "");
+      setPermissionMode(currentSettings.permissionMode || 'ask');
+      setEnableMemory(currentSettings.enableMemory || false);
     }
   }, [currentSettings]);
 
-  const handleSave = () => {
+  // Load memory content when modal opens and memory is enabled
+  useEffect(() => {
+    if (enableMemory) {
+      loadMemoryContent();
+    }
+  }, [enableMemory]);
+
+  const loadMemoryContent = async () => {
+    setMemoryLoading(true);
+    try {
+      const content = await window.electron.invoke('read-memory');
+      setMemoryContent(content || "");
+    } catch (error) {
+      console.error('Failed to load memory:', error);
+      setMemoryContent("");
+    } finally {
+      setMemoryLoading(false);
+    }
+  };
+
+  const saveMemoryContent = async () => {
+    try {
+      await window.electron.invoke('write-memory', memoryContent);
+    } catch (error) {
+      console.error('Failed to save memory:', error);
+    }
+  };
+
+  const handleSave = async () => {
     const tempValue = parseFloat(temperature);
+    
+    // Save memory content if changed
+    if (enableMemory) {
+      await saveMemoryContent();
+    }
+    
     onSave({
       apiKey: apiKey.trim(),
       baseUrl: baseUrl.trim(),
       model: model.trim(),
       temperature: !isNaN(tempValue) ? tempValue : 0.3,
-      tavilyApiKey: tavilyApiKey.trim() || undefined
+      tavilyApiKey: tavilyApiKey.trim() || undefined,
+      permissionMode,
+      enableMemory
     });
     onClose();
   };
@@ -45,18 +87,22 @@ export function SettingsModal({ onClose, onSave, currentSettings }: SettingsModa
     setModel("");
     setTemperature("0.3");
     setTavilyApiKey("");
+    setPermissionMode('ask');
+    setEnableMemory(false);
   };
 
   return (
     <Dialog.Root open onOpenChange={onClose}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg rounded-2xl border border-ink-900/10 bg-surface p-6 shadow-2xl">
-          <Dialog.Title className="text-xl font-semibold text-ink-900 mb-6">
-            API Settings
-          </Dialog.Title>
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg max-h-[90vh] rounded-2xl border border-ink-900/10 bg-surface shadow-2xl flex flex-col">
+          <div className="px-6 pt-6 pb-4 border-b border-ink-900/10">
+            <Dialog.Title className="text-xl font-semibold text-ink-900">
+              API Settings
+            </Dialog.Title>
+          </div>
 
-          <div className="space-y-4">
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
             <div>
               <label className="block text-sm font-medium text-ink-700 mb-2">
                 API Key
@@ -168,15 +214,71 @@ export function SettingsModal({ onClose, onSave, currentSettings }: SettingsModa
               </p>
             </div>
 
-            <div className="pt-2 px-4 py-3 bg-ink-50 rounded-lg">
-              <p className="text-xs text-ink-600 leading-relaxed">
-                <strong className="text-ink-700">Note:</strong> These settings will override the default <code className="bg-white px-1.5 py-0.5 rounded text-ink-900">~/.claude/settings.json</code> configuration. 
-                Leave fields empty to use the default Claude Code settings.
+            <div>
+              <label className="block text-sm font-medium text-ink-700 mb-2">
+                Permission Mode
+              </label>
+              <select
+                value={permissionMode}
+                onChange={(e) => setPermissionMode(e.target.value as 'default' | 'ask')}
+                className="w-full px-4 py-2.5 text-sm border border-ink-900/20 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-ink-900/20 transition-all"
+              >
+                <option value="default">Auto-execute (default)</option>
+                <option value="ask">Ask before each tool</option>
+              </select>
+              <p className="mt-1 text-xs text-ink-500">
+                Choose whether tools execute automatically or require confirmation
               </p>
             </div>
+
+            <div>
+              <label className="flex items-center justify-between cursor-pointer">
+                <div className="flex-1">
+                  <span className="block text-sm font-medium text-ink-700">Enable Memory</span>
+                  <p className="mt-1 text-xs text-ink-500">
+                    Allow agent to store and recall information in memory.md (stored in ~/.agent-cowork/)
+                  </p>
+                </div>
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={enableMemory}
+                    onChange={(e) => setEnableMemory(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-ink-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-accent/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-ink-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
+                </div>
+              </label>
+              {enableMemory && (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-xs font-medium text-ink-700">
+                      Memory Content
+                    </label>
+                    <button
+                      onClick={loadMemoryContent}
+                      disabled={memoryLoading}
+                      className="text-xs text-accent hover:underline disabled:opacity-50"
+                    >
+                      {memoryLoading ? "Loading..." : "Reload"}
+                    </button>
+                  </div>
+                  <textarea
+                    value={memoryContent}
+                    onChange={(e) => setMemoryContent(e.target.value)}
+                    placeholder="Memory is empty. Agent will automatically add information here during conversations..."
+                    className="w-full h-32 px-3 py-2 text-xs border border-ink-900/20 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-accent/20 transition-all resize-none font-mono"
+                  />
+                  <p className="mt-1 text-xs text-ink-500">
+                    File: <code className="bg-ink-50 px-1 py-0.5 rounded">~/.agent-cowork/memory.md</code>
+                  </p>
+                </div>
+              )}
+            </div>
+
           </div>
 
-          <div className="flex gap-3 mt-6">
+          <div className="px-6 py-4 border-t border-ink-900/10 flex gap-3">
             <button
               onClick={handleReset}
               className="flex-1 px-4 py-2.5 text-sm font-medium text-ink-600 bg-ink-50 rounded-lg hover:bg-ink-100 transition-colors"

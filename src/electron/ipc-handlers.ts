@@ -213,14 +213,104 @@ export function handleClientEvent(event: ClientEvent) {
     return;
   }
 
-  if (event.type === "permission.response") {
-    const session = sessions.getSession(event.payload.sessionId);
-    if (!session) return;
+  if (event.type === "session.pin") {
+    const { sessionId, isPinned } = event.payload;
+    sessions.setPinned(sessionId, isPinned);
+    emit({
+      type: "session.list",
+      payload: { sessions: sessions.listSessions() }
+    });
+    return;
+  }
 
-    const pending = session.pendingPermissions.get(event.payload.toolUseId);
-    if (pending) {
-      pending.resolve(event.payload.result);
+  if (event.type === "permission.response") {
+    const { sessionId, toolUseId, result } = event.payload;
+    const handle = runnerHandles.get(sessionId);
+    
+    if (handle && handle.resolvePermission) {
+      const approved = result.behavior === 'allow';
+      console.log(`[IPC] Permission response for ${toolUseId}: ${approved ? 'APPROVED' : 'DENIED'}`);
+      handle.resolvePermission(toolUseId, approved);
+    } else {
+      console.warn(`[IPC] No runner handle found for session ${sessionId}`);
     }
+    return;
+  }
+
+  if (event.type === "message.edit") {
+    const { sessionId, messageIndex, newPrompt } = event.payload;
+    const session = sessions.getSession(sessionId);
+    
+    if (!session) {
+      emit({
+        type: "runner.error",
+        payload: { message: "Unknown session" }
+      });
+      return;
+    }
+
+    // Stop current runner if running
+    const handle = runnerHandles.get(sessionId);
+    if (handle) {
+      handle.abort();
+      runnerHandles.delete(sessionId);
+    }
+
+    // Truncate history after the edited message
+    sessions.truncateHistoryAfter(sessionId, messageIndex);
+    
+    // Update the message with new prompt
+    sessions.updateMessageAt(sessionId, messageIndex, { prompt: newPrompt });
+
+    // Get updated history and send to UI
+    const updatedHistory = sessions.getSessionHistory(sessionId);
+    if (updatedHistory) {
+      emit({
+        type: "session.history",
+        payload: {
+          sessionId: updatedHistory.session.id,
+          status: updatedHistory.session.status,
+          messages: updatedHistory.messages
+        }
+      });
+    }
+
+    // Update session status
+    sessions.updateSession(sessionId, { status: "running", lastPrompt: newPrompt });
+    
+    // Emit status update
+    emit({
+      type: "session.status",
+      payload: { sessionId: session.id, status: "running", title: session.title, cwd: session.cwd }
+    });
+
+    // Re-run from this point
+    runClaude({
+      prompt: newPrompt,
+      session,
+      resumeSessionId: session.claudeSessionId,
+      onEvent: emit,
+      onSessionUpdate: (updates) => {
+        sessions.updateSession(session.id, updates);
+      }
+    })
+      .then((newHandle) => {
+        runnerHandles.set(session.id, newHandle);
+      })
+      .catch((error) => {
+        sessions.updateSession(session.id, { status: "error" });
+        emit({
+          type: "session.status",
+          payload: {
+            sessionId: session.id,
+            status: "error",
+            title: session.title,
+            cwd: session.cwd,
+            error: String(error)
+          }
+        });
+      });
+
     return;
   }
 

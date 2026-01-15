@@ -72,10 +72,15 @@ export function PromptInput({ sendEvent }: PromptInputProps) {
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key !== "Enter" || e.shiftKey) return;
-    e.preventDefault();
-    if (isRunning) { handleStop(); return; }
-    handleSend();
+    // Enter to send (without Shift)
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (isRunning) { handleStop(); return; }
+      handleSend();
+      return;
+    }
+    
+    // Shift+Enter - allow multiline (default behavior)
   };
 
   const handleInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
@@ -106,28 +111,33 @@ export function PromptInput({ sendEvent }: PromptInputProps) {
 
   return (
     <section className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-surface via-surface to-transparent pb-6 px-2 lg:pb-8 pt-8 lg:ml-[280px]">
-      <div className="mx-auto flex w-full max-w-full items-end gap-3 rounded-2xl border border-ink-900/10 bg-surface px-4 py-3 shadow-card lg:max-w-3xl">
-        <textarea
-          rows={1}
-          className="flex-1 resize-none bg-transparent py-1.5 text-sm text-ink-800 placeholder:text-muted focus:outline-none"
-          placeholder="Describe what you want agent to handle..."
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onInput={handleInput}
-          ref={promptRef}
-        />
-        <button
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${isRunning ? "bg-error text-white hover:bg-error/90" : "bg-accent text-white hover:bg-accent-hover"}`}
-          onClick={isRunning ? handleStop : handleSend}
-          aria-label={isRunning ? "Stop session" : "Send prompt"}
-        >
-          {isRunning ? (
-            <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" /></svg>
-          ) : (
-            <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true"><path d="M3.4 20.6 21 12 3.4 3.4l2.8 7.2L16 12l-9.8 1.4-2.8 7.2Z" fill="currentColor" /></svg>
-          )}
-        </button>
+      <div className="mx-auto w-full max-w-full lg:max-w-3xl">
+        <div className="flex w-full items-end gap-3 rounded-2xl border border-ink-900/10 bg-surface px-4 py-3 shadow-card">
+          <textarea
+            rows={1}
+            className="flex-1 resize-none bg-transparent py-1.5 text-sm text-ink-800 placeholder:text-muted focus:outline-none"
+            placeholder="Describe what you want agent to handle..."
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onInput={handleInput}
+            ref={promptRef}
+          />
+          <button
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${isRunning ? "bg-error text-white hover:bg-error/90" : "bg-accent text-white hover:bg-accent-hover"}`}
+            onClick={isRunning ? handleStop : handleSend}
+            aria-label={isRunning ? "Stop session" : "Send prompt"}
+          >
+            {isRunning ? (
+              <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" /></svg>
+            ) : (
+              <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true"><path d="M3.4 20.6 21 12 3.4 3.4l2.8 7.2L16 12l-9.8 1.4-2.8 7.2Z" fill="currentColor" /></svg>
+            )}
+          </button>
+        </div>
+        <div className="mt-2 px-2 text-xs text-muted text-center">
+          Press <span className="font-medium text-ink-700">Enter</span> to send • <span className="font-medium text-ink-700">Shift + Enter</span> for new line
+        </div>
       </div>
     </section>
   );

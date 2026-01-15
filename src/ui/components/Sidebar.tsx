@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import * as Dialog from "@radix-ui/react-dialog";
 import { useAppStore } from "../store/useAppStore";
 
 interface SidebarProps {
@@ -20,9 +19,8 @@ export function Sidebar({
   const sessions = useAppStore((state) => state.sessions);
   const activeSessionId = useAppStore((state) => state.activeSessionId);
   const setActiveSessionId = useAppStore((state) => state.setActiveSessionId);
-  const [resumeSessionId, setResumeSessionId] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const closeTimerRef = useRef<number | null>(null);
+  const sendEvent = useAppStore((state) => state.sendEvent);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const formatCwd = (cwd?: string) => {
     if (!cwd) return "Working dir unavailable";
@@ -32,44 +30,39 @@ export function Sidebar({
   };
 
   const sessionList = useMemo(() => {
-    const list = Object.values(sessions);
-    list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    let list = Object.values(sessions);
+    
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      list = list.filter(session => 
+        session.title.toLowerCase().includes(query) ||
+        session.cwd?.toLowerCase().includes(query)
+      );
+    }
+    
+    // Sort: pinned first, then by updatedAt
+    list.sort((a, b) => {
+      const aPinned = a.isPinned || false;
+      const bPinned = b.isPinned || false;
+      
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      
+      return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
+    });
+    
     return list;
-  }, [sessions]);
+  }, [sessions, searchQuery]);
 
-  useEffect(() => {
-    setCopied(false);
-    if (closeTimerRef.current) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-  }, [resumeSessionId]);
-
-  useEffect(() => {
-    return () => {
-      if (closeTimerRef.current) {
-        window.clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  const handleCopyCommand = async () => {
-    if (!resumeSessionId) return;
-    const command = `claude --resume ${resumeSessionId}`;
-    try {
-      await navigator.clipboard.writeText(command);
-    } catch {
-      return;
-    }
-    setCopied(true);
-    if (closeTimerRef.current) {
-      window.clearTimeout(closeTimerRef.current);
-    }
-    closeTimerRef.current = window.setTimeout(() => {
-      setResumeSessionId(null);
-    }, 3000);
+  const togglePin = (sessionId: string) => {
+    const session = sessions[sessionId];
+    if (!session) return;
+    
+    const newPinnedState = !session.isPinned;
+    sendEvent({ type: 'session.pin', payload: { sessionId, isPinned: newPinnedState } });
   };
+
 
   return (
     <aside className="fixed inset-y-0 left-0 flex h-full w-[280px] flex-col gap-4 border-r border-ink-900/5 bg-[#FAF9F6] px-4 pb-4 pt-12">
@@ -95,6 +88,21 @@ export function Sidebar({
         </svg>
         Settings
       </button>
+
+      {/* Search input */}
+      <div className="relative">
+        <input
+          type="text"
+          placeholder="Search sessions..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full rounded-xl border border-ink-900/10 bg-surface pl-9 pr-4 py-2 text-sm text-ink-800 placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/20 transition-colors"
+        />
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="8" strokeWidth="2"/>
+          <path d="m21 21-4.35-4.35" strokeWidth="2" strokeLinecap="round"/>
+        </svg>
+      </div>
       
       {currentModel && (
         <div className="w-full rounded-lg border border-info/20 bg-info/5 px-3 py-2">
@@ -122,19 +130,30 @@ export function Sidebar({
         {sessionList.map((session) => (
           <div
             key={session.id}
-            className={`cursor-pointer rounded-xl border px-2 py-3 text-left transition ${activeSessionId === session.id ? "border-accent/30 bg-accent-subtle" : "border-ink-900/5 bg-surface hover:bg-surface-tertiary"}`}
+            className={`cursor-pointer rounded-xl border px-2 py-3 text-left transition ${
+              session.isPinned 
+                ? (activeSessionId === session.id ? "border-info/50 bg-info/10" : "border-info/30 bg-info/5 hover:bg-info/10")
+                : (activeSessionId === session.id ? "border-accent/30 bg-accent-subtle" : "border-ink-900/5 bg-surface hover:bg-surface-tertiary")
+            }`}
             onClick={() => setActiveSessionId(session.id)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActiveSessionId(session.id); } }}
             role="button"
             tabIndex={0}
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
-                <div className={`text-[12px] font-medium ${session.status === "running" ? "text-info" : session.status === "completed" ? "text-success" : session.status === "error" ? "text-error" : "text-ink-800"}`}>
-                  {session.title}
-                </div>
-                <div className="flex items-center justify-between mt-0.5 text-xs text-muted">
-                  <span className="truncate">{formatCwd(session.cwd)}</span>
+              <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
+                {session.isPinned && (
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-info flex-shrink-0 fill-info" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <path d="M12 2v8m0 0l4-4m-4 4L8 6m4 4l-2 10h4l-2-10z" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+                <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
+                  <div className={`text-[12px] font-medium ${session.status === "running" ? "text-info" : session.status === "completed" ? "text-success" : session.status === "error" ? "text-error" : "text-ink-800"}`}>
+                    {session.title}
+                  </div>
+                  <div className="flex items-center justify-between mt-0.5 text-xs text-muted">
+                    <span className="truncate">{formatCwd(session.cwd)}</span>
+                  </div>
                 </div>
               </div>
               <DropdownMenu.Root>
@@ -149,17 +168,17 @@ export function Sidebar({
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content className="z-50 min-w-[220px] rounded-xl border border-ink-900/10 bg-white p-1 shadow-lg" align="center" sideOffset={8}>
+                    <DropdownMenu.Item className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 outline-none hover:bg-ink-900/5" onSelect={() => togglePin(session.id)}>
+                      <svg viewBox="0 0 24 24" className={`h-4 w-4 ${session.isPinned ? 'text-info fill-info' : 'text-ink-500'}`} fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <path d="M12 2v8m0 0l4-4m-4 4L8 6m4 4l-2 10h4l-2-10z" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      {session.isPinned ? 'Unpin' : 'Pin'} session
+                    </DropdownMenu.Item>
                     <DropdownMenu.Item className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 outline-none hover:bg-ink-900/5" onSelect={() => onDeleteSession(session.id)}>
                       <svg viewBox="0 0 24 24" className="h-4 w-4 text-error/80" fill="none" stroke="currentColor" strokeWidth="1.8">
                         <path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M7 7l1 12a1 1 0 0 0 1 .9h6a1 1 0 0 0 1-.9l1-12" />
                       </svg>
                       Delete this session
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm text-ink-700 outline-none hover:bg-ink-900/5" onSelect={() => setResumeSessionId(session.id)}>
-                      <svg viewBox="0 0 24 24" className="h-4 w-4 text-ink-500" fill="none" stroke="currentColor" strokeWidth="1.8">
-                        <path d="M4 5h16v14H4z" /><path d="M7 9h10M7 12h6" /><path d="M13 15l3 2-3 2" />
-                      </svg>
-                      Resume in Claude Code
                     </DropdownMenu.Item>
                   </DropdownMenu.Content>
                 </DropdownMenu.Portal>
@@ -168,33 +187,6 @@ export function Sidebar({
           </div>
         ))}
       </div>
-      <Dialog.Root open={!!resumeSessionId} onOpenChange={(open) => !open && setResumeSessionId(null)}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 bg-ink-900/40 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 w-full max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
-              <Dialog.Title className="text-lg font-semibold text-ink-800">Resume</Dialog.Title>
-              <Dialog.Close asChild>
-                <button className="rounded-full p-1 text-ink-500 hover:bg-ink-900/10" aria-label="Close dialog">
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M6 6l12 12M18 6l-12 12" />
-                  </svg>
-                </button>
-              </Dialog.Close>
-            </div>
-            <div className="mt-4 flex items-center gap-2 rounded-xl border border-ink-900/10 bg-surface px-3 py-2 font-mono text-xs text-ink-700">
-              <span className="flex-1 break-all">{resumeSessionId ? `claude --resume ${resumeSessionId}` : ""}</span>
-              <button className="rounded-lg p-1.5 text-ink-600 hover:bg-ink-900/10" onClick={handleCopyCommand} aria-label="Copy resume command">
-                {copied ? (
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12l4 4L19 6" /></svg>
-                ) : (
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
-                )}
-              </button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
     </aside>
   );
 }

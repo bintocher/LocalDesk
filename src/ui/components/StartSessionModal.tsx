@@ -88,7 +88,16 @@ export function StartSessionModal({
               placeholder="Describe the task you want agent to handle..."
               value={prompt}
               onChange={(e) => onPromptChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !pendingStart && cwd.trim() && prompt.trim()) {
+                  e.preventDefault();
+                  onStart();
+                }
+              }}
             />
+            <div className="text-xs text-muted text-center">
+              Press <span className="font-medium text-ink-700">{typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0 ? '⌘ + Enter' : 'Ctrl + Enter'}</span> to start
+            </div>
           </label>
           <button
             className="flex flex-col items-center rounded-full bg-accent px-5 py-3 text-sm font-medium text-white shadow-soft hover:bg-accent-hover transition-colors disabled:cursor-not-allowed disabled:opacity-50"

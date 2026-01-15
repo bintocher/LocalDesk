@@ -18,6 +18,14 @@ export default function MDContent({ text }: { text: string }) {
         li: (props) => <li className="min-w-0 text-ink-700" {...props} />,
         strong: (props) => <strong className="text-ink-900 font-semibold" {...props} />,
         em: (props) => <em className="text-ink-800" {...props} />,
+        a: (props) => (
+          <a 
+            className="text-accent hover:text-accent-hover underline cursor-pointer transition-colors" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            {...props} 
+          />
+        ),
         pre: (props) => (
           <pre
             className="mt-3 max-w-full overflow-x-auto whitespace-pre-wrap rounded-xl bg-surface-tertiary p-3 text-sm text-ink-700"

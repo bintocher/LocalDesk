@@ -12,12 +12,23 @@ type StaticData = {
 
 type UnsubscribeFunction = () => void;
 
+type FileItem = {
+    name: string;
+    path: string;
+    isDirectory: boolean;
+    size?: number;
+}
+
 type EventPayloadMapping = {
     statistics: Statistics;
     getStaticData: StaticData;
     "generate-session-title": string;
     "get-recent-cwds": string[];
     "select-directory": string | null;
+    "list-directory": FileItem[];
+    "open-path-in-finder": { success: boolean; error?: string };
+    "read-memory": string;
+    "write-memory": void;
 }
 
 interface Window {
@@ -30,5 +41,8 @@ interface Window {
         generateSessionTitle: (userInput: string | null) => Promise<string>;
         getRecentCwds: (limit?: number) => Promise<string[]>;
         selectDirectory: () => Promise<string | null>;
+        // File browser APIs
+        invoke: (channel: string, ...args: any[]) => Promise<any>;
+        send: (channel: string, ...args: any[]) => void;
     }
 }

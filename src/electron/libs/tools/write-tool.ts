@@ -2,15 +2,16 @@
  * Write Tool - Create new files
  */
 
-import { writeFile, mkdir } from 'fs/promises';
+import { writeFile, mkdir, access } from 'fs/promises';
 import { dirname, resolve } from 'path';
+import { constants } from 'fs';
 import type { ToolDefinition, ToolResult, ToolExecutionContext } from './base-tool.js';
 
 export const WriteToolDefinition: ToolDefinition = {
   type: "function",
   function: {
     name: "Write",
-    description: "Create a new file with the given content. Use this to create new files.",
+    description: "Create a new file with the given content. Use this to create new files. IMPORTANT: If the file already exists, choose a different filename (e.g., add a number suffix or timestamp) instead of trying to edit it.",
     parameters: {
       type: "object",
       properties: {
@@ -46,6 +47,18 @@ export async function executeWriteTool(
   
   try {
     const fullPath = resolve(context.cwd, args.file_path);
+    
+    // Check if file already exists
+    try {
+      await access(fullPath, constants.F_OK);
+      return {
+        success: false,
+        error: `File already exists: ${args.file_path}. Please choose a different filename or use Edit tool to modify the existing file.`
+      };
+    } catch {
+      // File doesn't exist, proceed with creation
+    }
+    
     const dir = dirname(fullPath);
     
     // Create directory if it doesn't exist

@@ -74,16 +74,23 @@ export function getSystemPrompt(cwd: string): string {
 /**
  * Load initial prompt template and replace placeholders
  */
-export function getInitialPrompt(task: string): string {
+export function getInitialPrompt(task: string, memoryContent?: string): string {
   const promptPath = join(__dirname, 'prompts', 'initial_prompt.txt');
   let template = readFileSync(promptPath, 'utf-8');
 
   const now = new Date();
   const currentDate = now.toISOString().replace('T', ' ').substring(0, 19);
 
+  // Build memory section if available
+  let memorySection = '';
+  if (memoryContent) {
+    memorySection = `MEMORY ABOUT USER:\n\n${memoryContent}\n\n---\n`;
+  }
+
   // Replace placeholders
   template = template
     .replace(/{current_date}/g, currentDate)
+    .replace(/{memory_section}/g, memorySection)
     .replace(/{task}/g, task);
 
   return template;
